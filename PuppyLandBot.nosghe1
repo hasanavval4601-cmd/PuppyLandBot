@@ -1,0 +1,836 @@
+import json
+import os
+import time
+import logging
+
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
+)
+
+# =========================================================
+# 🐶 PuppyLand V1
+# مخصوص Pydroid 3
+# =========================================================
+
+# ---------------------------------------------------------
+# 🔑 توکن ربات
+# ---------------------------------------------------------
+
+BOT_TOKEN = "8288013484:AAF9_QOBSgRh622jmV_-eVVZwKhifJrMIqA"
+
+# ---------------------------------------------------------
+# ⚙️ تنظیمات اصلی
+# ---------------------------------------------------------
+
+DATA_FILE = "puppyland_data.json"
+
+PAW_COOLDOWN = 6 * 60          # 6 دقیقه
+MIN_GROUP_MEMBERS = 8          # حداقل اعضای گروه
+
+START_PAW = 0
+
+# ---------------------------------------------------------
+# 📝 لاگ
+# ---------------------------------------------------------
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+
+logger = logging.getLogger(__name__)
+
+
+# =========================================================
+# 💾 سیستم ذخیره‌سازی
+# =========================================================
+
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        return {}
+
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as file:
+            return json.load(file)
+
+    except Exception:
+        return {}
+
+
+def save_data():
+    try:
+        with open(DATA_FILE, "w", encoding="utf-8") as file:
+            json.dump(
+                users,
+                file,
+                ensure_ascii=False,
+                indent=2
+            )
+
+    except Exception as error:
+        logger.error(f"خطا در ذخیره اطلاعات: {error}")
+
+
+users = load_data()
+
+
+# =========================================================
+# 👤 ساخت پروفایل کاربر
+# =========================================================
+
+def get_user(user):
+
+    user_id = str(user.id)
+
+    if user_id not in users:
+
+        users[user_id] = {
+            "id": user.id,
+            "name": user.first_name or "پاپی",
+            "username": user.username or "",
+
+            "paw_points": START_PAW,
+
+            "pet_name": "پاپی",
+            "pet_type": "🐶 سگ",
+            "pet_level": 1,
+
+            "last_paw": 0,
+
+            "created": int(time.time()),
+        }
+
+        save_data()
+
+    else:
+
+        users[user_id]["name"] = user.first_name or users[user_id].get(
+            "name",
+            "پاپی"
+        )
+
+        users[user_id]["username"] = user.username or ""
+
+    return users[user_id]
+
+
+# =========================================================
+# 👥 بررسی گروه ۸ نفره
+# =========================================================
+
+async def is_valid_group(update: Update):
+
+    chat = update.effective_chat
+
+    if chat.type not in ["group", "supergroup"]:
+        return True
+
+    try:
+
+        member_count = await chat.get_member_count()
+
+        return member_count >= MIN_GROUP_MEMBERS
+
+    except Exception:
+
+        # اگر تلگرام تعداد اعضا را نداد،
+        # فعلاً اجازه ادامه می‌دهیم.
+        return True
+
+
+async def group_limit_message(update: Update):
+
+    await update.effective_message.reply_text(
+        "🐶✨ پاپی‌لند برای بازی گروهی ساخته شده!\n\n"
+        "👥 برای فعال شدن امکانات بازی در این گروه، "
+        "حداقل ۸ عضو لازم است.\n\n"
+        "🐾 وقتی گروه به ۸ نفر رسید، پاپی‌لند آماده بازیه! 🎮✨"
+    )
+
+
+# =========================================================
+# 🏠 START
+# =========================================================
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user = get_user(update.effective_user)
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "❓ راهنمای پاپی‌لند",
+                callback_data="help"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "📜 قوانین",
+                callback_data="rules_1"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "👥 افزودن پاپی‌لند به گروه",
+                url="https://t.me/YOUR_BOT_USERNAME?startgroup=true"
+            )
+        ],
+    ]
+
+    text = (
+        "🐶✨ به **PuppyLand | پاپی‌لند** خوش اومدی!\n\n"
+
+        f"سلام {user['name']} جان! 🐾❤️\n\n"
+
+        "اینجا قراره وارد دنیای پاپی‌ها بشی؛\n"
+        "جایی که هر پاپی داستان و پیشرفت خودش رو داره! 🐶🎮\n\n"
+
+        "🌟 **چرا پاپی‌لند؟**\n\n"
+
+        "🐾 بازی گروهی\n"
+        "🐶 نگهداری از پاپی\n"
+        "💰 جمع‌آوری پاوپوینت\n"
+        "📈 پیشرفت و رشد\n"
+        "✨ فضای گیم‌وار و سرگرم‌کننده\n\n"
+
+        "🚀 پاپی‌لند رو به گروهت اضافه کن و شروع کن!"
+    )
+
+    await update.effective_message.reply_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+# =========================================================
+# ❓ HELP
+# =========================================================
+
+async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "🐾 شروع پاپی‌لند",
+                callback_data="help_start"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "✨ قابلیت‌های پاپی",
+                callback_data="help_features"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "⚙️ سیستم پاپی",
+                callback_data="help_system"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🔙 بازگشت",
+                callback_data="back_start"
+            )
+        ],
+    ]
+
+    text = (
+        "❓ **راهنمای PuppyLand** 🐶✨\n\n"
+        "یکی از بخش‌های زیر رو انتخاب کن:"
+    )
+
+    if update.callback_query:
+
+        await update.callback_query.edit_message_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    else:
+
+        await update.effective_message.reply_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+
+# =========================================================
+# 📜 RULES PAGE 1
+# =========================================================
+
+async def rules_page_1(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "➡️ صفحه بعد",
+                callback_data="rules_2"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🔙 بازگشت",
+                callback_data="back_start"
+            )
+        ],
+    ]
+
+    text = (
+        "📜 **قوانین پاپی‌لند | صفحه ۱/۲** 🐶\n\n"
+
+        "1️⃣ پاپی‌لند یک بازی گروهی و سرگرم‌کننده است. 🎮\n\n"
+
+        "2️⃣ امکانات اصلی بازی در گروه‌هایی با حداقل "
+        "۸ عضو فعال می‌شوند. 👥\n\n"
+
+        "3️⃣ هر کاربر مسئول اطلاعات و فعالیت‌های حساب خودش است. 👤\n\n"
+
+        "4️⃣ استفاده از ربات باید طبق قوانین تلگرام و قوانین گروه باشد. ⚠️\n\n"
+
+        "5️⃣ ایجاد مزاحمت، اسپم یا سوءاستفاده از ربات مجاز نیست. 🚫"
+    )
+
+    await update.callback_query.edit_message_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+# =========================================================
+# 📜 RULES PAGE 2
+# =========================================================
+
+async def rules_page_2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "⬅️ صفحه قبل",
+                callback_data="rules_1"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🔙 بازگشت",
+                callback_data="back_start"
+            )
+        ],
+    ]
+
+    text = (
+        "📜 **قوانین پاپی‌لند | صفحه ۲/۲** 🐶\n\n"
+
+        "6️⃣ هر کاربر فقط از حساب خودش استفاده کند. 👤\n\n"
+
+        "7️⃣ اطلاعات بازی به صورت ذخیره‌شده نگهداری می‌شود. 💾\n\n"
+
+        "8️⃣ تایمرهای بازی برای جلوگیری از سوءاستفاده اعمال می‌شوند. ⏱️\n\n"
+
+        "9️⃣ دستورات «پاو» و «پاپی» عملکرد جداگانه دارند. ⚠️\n\n"
+
+        "🐾 «پاو» = دریافت پاوپوینت\n"
+        "🐶 «پاپی» = اطلاعات حیوان\n\n"
+
+        "✨ با ورود به پاپی‌لند، قوانین را می‌پذیری."
+    )
+
+    await update.callback_query.edit_message_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+# =========================================================
+# 🐾 PAW
+# =========================================================
+
+async def paw(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    # فقط پیام واقعی
+    if not update.effective_user:
+        return
+
+    # بررسی گروه
+    if update.effective_chat.type in ["group", "supergroup"]:
+
+        valid = await is_valid_group(update)
+
+        if not valid:
+            await group_limit_message(update)
+            return
+
+    user = get_user(update.effective_user)
+
+    now = int(time.time())
+
+    last_paw = user.get("last_paw", 0)
+
+    remaining = PAW_COOLDOWN - (now - last_paw)
+
+    if remaining > 0:
+
+        minutes = remaining // 60
+        seconds = remaining % 60
+
+        await update.effective_message.reply_text(
+            "🐾⏳ پاپی هنوز آماده نیست!\n\n"
+            f"⏱️ زمان باقی‌مانده: **{minutes} دقیقه و {seconds} ثانیه**\n\n"
+            "✨ دوباره بعداً امتحان کن!"
+            ,
+            parse_mode="Markdown"
+        )
+
+        return
+
+    # دریافت Paw
+    reward = 1
+
+    user["paw_points"] += reward
+    user["last_paw"] = now
+
+    save_data()
+
+    await update.effective_message.reply_text(
+        "🐾✨ **پاو!**\n\n"
+        f"🎁 +{reward} پاوپوینت\n"
+        f"💰 موجودی: **{user['paw_points']} پاوپوینت**\n\n"
+        "⏱️ تایمر ۶ دقیقه‌ای فعال شد!\n"
+        "🐶✨ پاپی منتظرته..."
+        ,
+        parse_mode="Markdown"
+    )
+
+
+# =========================================================
+# 🐶 PUPPY
+# =========================================================
+
+async def puppy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_chat.type in ["group", "supergroup"]:
+
+        valid = await is_valid_group(update)
+
+        if not valid:
+            await group_limit_message(update)
+            return
+
+    user = get_user(update.effective_user)
+
+    text = (
+        "🐶✨ **اطلاعات پاپی**\n\n"
+
+        f"🐾 نام پاپی: **{user['pet_name']}**\n"
+        f"🐶 نوع: **{user['pet_type']}**\n"
+        f"⭐ سطح: **{user['pet_level']}**\n\n"
+
+        "💖 پاپی همیشه منتظرته!\n"
+        "✨ باهاش همراه شو تا ماجراجویی‌تون شروع بشه!"
+    )
+
+    await update.effective_message.reply_text(
+        text,
+        parse_mode="Markdown"
+    )
+
+
+# =========================================================
+# 👤 PROFILE
+# =========================================================
+
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_chat.type in ["group", "supergroup"]:
+
+        valid = await is_valid_group(update)
+
+        if not valid:
+            await group_limit_message(update)
+            return
+
+    user = get_user(update.effective_user)
+
+    username = (
+        f"@{user['username']}"
+        if user.get("username")
+        else "ندارد"
+    )
+
+    text = (
+        "👤✨ **پروفایل پاپی‌لند**\n\n"
+
+        f"👤 نام: **{user['name']}**\n"
+        f"🔹 یوزرنیم: {username}\n\n"
+
+        f"🐶 پاپی: **{user['pet_name']}**\n"
+        f"⭐ سطح پاپی: **{user['pet_level']}**\n"
+        f"🐾 پاوپوینت: **{user['paw_points']}**\n\n"
+
+        "✨ پروفایل شما ذخیره می‌شود و پیشرفتتان از بین نمی‌رود."
+    )
+
+    await update.effective_message.reply_text(
+        text,
+        parse_mode="Markdown"
+    )
+
+
+# =========================================================
+# 🔘 CALLBACKS
+# =========================================================
+
+async def button_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    query = update.callback_query
+
+    await query.answer()
+
+    data = query.data
+
+    # -------------------------
+    # HELP
+    # -------------------------
+
+    if data == "help":
+        await help_menu(update, context)
+
+    elif data == "help_start":
+
+        text = (
+            "🐾 **شروع پاپی‌لند** 🐶✨\n\n"
+
+            "برای شروع، پاپی‌لند رو به یک گروه اضافه کن.\n\n"
+
+            "👥 گروه باید حداقل ۸ عضو داشته باشه.\n\n"
+
+            "بعد از فعال شدن بازی می‌تونی از:\n\n"
+
+            "🐾 «پاو»\n"
+            "🐶 «پاپی»\n"
+            "👤 «پروفایل پاپی»\n"
+            "👤 «پاوهام»\n\n"
+
+            "استفاده کنی."
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="help"
+                )
+            ]
+        ]
+
+        await query.edit_message_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data == "help_features":
+
+        text = (
+            "✨ **قابلیت‌های پاپی** 🐶\n\n"
+
+            "🐾 دریافت پاوپوینت\n"
+            "🐶 مشاهده اطلاعات پاپی\n"
+            "👤 مشاهده پروفایل\n"
+            "💾 ذخیره پیشرفت\n"
+            "👥 بازی در گروه\n"
+            "⏱️ سیستم تایمر\n\n"
+
+            "🚀 این فقط نسخه اول پاپی‌لنده!"
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="help"
+                )
+            ]
+        ]
+
+        await query.edit_message_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data == "help_system":
+
+        text = (
+            "⚙️ **سیستم پاپی‌لند** 🐶\n\n"
+
+            "🐾 پاو = دریافت پاوپوینت\n"
+            "🐶 پاپی = اطلاعات حیوان\n"
+            "👤 پروفایل پاپی = اطلاعات کاربر\n"
+            "👤 پاوهام = اطلاعات کلی کاربر\n\n"
+
+            "⏱️ دریافت پاو هر ۶ دقیقه یک‌بار انجام می‌شود.\n\n"
+
+            "💾 اطلاعات کاربران ذخیره می‌شود."
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="help"
+                )
+            ]
+        ]
+
+        await query.edit_message_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    # -------------------------
+    # RULES
+    # -------------------------
+
+    elif data == "rules_1":
+
+        await rules_page_1(update, context)
+
+    elif data == "rules_2":
+
+        await rules_page_2(update, context)
+
+    # -------------------------
+    # BACK
+    # -------------------------
+
+    elif data == "back_start":
+
+        user = get_user(update.effective_user)
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "❓ راهنمای پاپی‌لند",
+                    callback_data="help"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📜 قوانین",
+                    callback_data="rules_1"
+                )
+            ],
+        ]
+
+        text = (
+            "🐶✨ **PuppyLand**\n\n"
+            f"خوش برگشتی {user['name']} جان! 🐾❤️\n\n"
+            "از منوی زیر انتخاب کن:"
+        )
+
+        await query.edit_message_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+
+# =========================================================
+# 📜 متن دستورات
+# =========================================================
+
+async def rules_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    # نمایش صفحه اول قوانین
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "➡️ صفحه بعد",
+                callback_data="rules_2"
+            )
+        ]
+    ]
+
+    await update.effective_message.reply_text(
+        "📜 **قوانین پاپی‌لند | صفحه ۱/۲**\n\n"
+        "🐶 قوانین اصلی پاپی‌لند را در دو صفحه مشاهده می‌کنی.\n\n"
+        "👥 امکانات بازی در گروه‌های ۸ نفر به بالا فعال می‌شوند.\n"
+        "⚠️ استفاده صحیح از ربات الزامی است.\n"
+        "💾 اطلاعات بازی ذخیره می‌شود.\n"
+        "🐾 «پاو» و «پاپی» عملکرد متفاوت دارند.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+# =========================================================
+# 💬 پیام‌های متنی
+# =========================================================
+
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not update.message:
+        return
+
+    text = update.message.text.strip()
+
+    # -----------------------------------------
+    # 🐾 پاو
+    # -----------------------------------------
+
+    if text == "پاو":
+        await paw(update, context)
+        return
+
+    # -----------------------------------------
+    # 🐶 پاپی
+    # -----------------------------------------
+
+    if text == "پاپی":
+        await puppy(update, context)
+        return
+
+    # -----------------------------------------
+    # 👤 پروفایل پاپی
+    # -----------------------------------------
+
+    if text == "پروفایل پاپی":
+        await profile(update, context)
+        return
+
+    # -----------------------------------------
+    # 👤 پاوهام
+    # -----------------------------------------
+
+    if text == "پاوهام":
+        await profile(update, context)
+        return
+
+
+# =========================================================
+# 🚨 ERROR HANDLER
+# =========================================================
+
+async def error_handler(
+    update: object,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    logger.error(
+        "Exception while handling update:",
+        exc_info=context.error
+    )
+
+
+# =========================================================
+# 🚀 MAIN
+# =========================================================
+
+def main():
+
+    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+
+        print(
+            "\n"
+            "====================================\n"
+            "🐶 PuppyLand\n"
+            "====================================\n"
+            "❌ هنوز BOT TOKEN وارد نشده!\n"
+            "توکن ربات را داخل BOT_TOKEN قرار بده.\n"
+            "====================================\n"
+        )
+
+        return
+
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .build()
+    )
+
+    # -------------------------
+    # Commands
+    # -------------------------
+
+    application.add_handler(
+        CommandHandler("start", start)
+    )
+
+    application.add_handler(
+        CommandHandler("help", help_menu)
+    )
+
+    application.add_handler(
+        CommandHandler("rules", rules_command)
+    )
+
+    # -------------------------
+    # Buttons
+    # -------------------------
+
+    application.add_handler(
+        CallbackQueryHandler(button_handler)
+    )
+
+    # -------------------------
+    # Persian text
+    # -------------------------
+
+    application.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            text_handler
+        )
+    )
+
+    # -------------------------
+    # Errors
+    # -------------------------
+
+    application.add_error_handler(error_handler)
+
+    print("\n")
+    print("======================================")
+    print("🐶 PuppyLand V1")
+    print("======================================")
+    print("🚀 Bot is starting...")
+    print("📱 Pydroid 3")
+    print("💾 Data file:", DATA_FILE)
+    print("⏱️ Paw cooldown: 6 minutes")
+    print("👥 Minimum group members: 8")
+    print("======================================")
+    print("🐾 PuppyLand is ONLINE!")
+    print("======================================")
+    print("\n")
+
+    application.run_polling(
+        drop_pending_updates=True
+    )
+
+
+# =========================================================
+# ▶️ START
+# =========================================================
+
+if __name__ == "__main__":
+    main()
